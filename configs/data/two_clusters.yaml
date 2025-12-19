@@ -1,0 +1,6 @@
+_target_: data.toy_datasets.TwoClusterDataset
+
+n_points: 1000
+cluster1_center: [2.0, 2.0]
+cluster2_center: [-2.0, -2.0]
+cluster_std: 0.3

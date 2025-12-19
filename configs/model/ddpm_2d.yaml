@@ -1,0 +1,17 @@
+_target_: models.ddpm.DDPM2D
+
+network:
+  _target_: models.networks.SimpelMLP
+  hidden_dim: 128
+  time_embed_dim: 32
+  num_layers: 3
+
+schdule:
+  type: linear
+  timesteps: 1000
+  beta_start: 0.0001
+  beta_end: 0.02
+
+sampling:
+  n_steps: 50
+  clip_denoised: true

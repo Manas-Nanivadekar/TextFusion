@@ -1,0 +1,17 @@
+defaults:
+  - model: ddpm_2d
+  - data: two_clusters
+  - training: default
+  - _self_
+
+experiment_name: "ddpm_2d_baseline"
+seed: 42
+
+wandb:
+  entity: null
+  project: "diffusion_models"
+  group: "online"
+
+output_dir: "outputs"
+save_samples: true
+save_checkpoints: true
