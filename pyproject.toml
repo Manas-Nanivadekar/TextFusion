@@ -14,3 +14,11 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.23.1",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["models*", "data*", "training*", "utils*"]
+exclude = ["notebooks*", "experiments*", "outputs*", "configs*"]
