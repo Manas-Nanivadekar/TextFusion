@@ -94,3 +94,65 @@ class DDPM2D(DiffusionModel):
             trajectory = torch.stack(trajectory)
 
         return x, trajectory
+
+    @torch.no_grad()
+    def sample_ode(
+        self,
+        n_samples: int,
+        n_steps: int = 50,
+        return_trajectory: bool = False,
+        device: str = "cpu",
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        self.eval()
+
+        x = torch.randn(n_samples, 2, device=device)
+
+        timesteps = torch.linspace(1, 0, n_steps + 1, device=device)
+
+        trajectory = [x.clone() if return_trajectory else None]
+
+        for i in range(n_steps):
+            t_current = timesteps[i]
+            t_next = timesteps[i + 1]
+            dt = t_next - t_current
+
+            t = torch.full((n_samples,), t_current, device=device)
+
+            alpha_t, sigma_t = self.schedule.get_alpha_sigma(t)
+            alpha_t = alpha_t.unsqueeze(1)
+            sigma_t = sigma_t.unsqueeze(1)
+
+            epsilon_pred = self.forward(x, t)
+
+            if t_next > 0:
+                t_next_tensor = torch.full((n_samples,), t_next, device=device)
+                alpha_next, sigma_next = self.schedule.get_alpha_sigma(t_next_tensor)
+                alpha_next = alpha_next.unsqueeze(1)
+                sigma_next = sigma_next.unsqueeze(1)
+
+                # Finite difference approximation
+                dalpha_dt = (alpha_next - alpha_t) / dt
+                dsigma_dt = (sigma_next - sigma_t) / dt
+            else:
+                eps = 0.001
+                t_prev = torch.full((n_samples,), t_current - eps, device=device)
+                alpha_prev, sigma_prev = self.schedule.get_alpha_sigma(t_prev)
+                alpha_prev = alpha_prev.unsqueeze(1)
+                sigma_prev = sigma_prev.unsqueeze(1)
+
+                dalpha_dt = (alpha_t - alpha_prev) / eps
+                dsigma_dt = (sigma_t - sigma_prev) / eps
+
+            dx_dt = (dalpha_dt / alpha_t) * x - dsigma_dt * epsilon_pred
+
+            x = x + dt * dx_dt
+
+            if return_trajectory:
+                trajectory.append(x.clone())
+
+        self.train()
+
+        if return_trajectory:
+            trajectory = torch.stack(trajectory)
+
+        return x, trajectory
