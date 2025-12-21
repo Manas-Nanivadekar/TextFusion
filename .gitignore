@@ -8,3 +8,48 @@ wheels/
 
 # Virtual environments
 .venv
+
+# .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.pyc
+
+# Outputs (models, logs, samples)
+outputs/
+*.pt
+*.pth
+*.ckpt
+
+# Hydra
+.hydra/
+multirun/
+
+# TensorBoard
+events.out.tfevents.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data (if you add larger datasets later)
+data/downloads/
+data/raw/
+*.zip
+*.tar.gz
