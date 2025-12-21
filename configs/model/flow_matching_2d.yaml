@@ -1,0 +1,10 @@
+network:
+  type: "SimpleMLP"
+  input_dim: 2
+  hidden_dim: 128
+  time_embed_dim: 32
+  num_layers: 3
+
+sampling:
+  n_steps: 50
+  clip_samples: true
