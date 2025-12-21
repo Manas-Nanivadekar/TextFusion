@@ -1,4 +1,4 @@
-dataset_type: "TwoClustersDataset"
+dataset_type: "TwoClusterDataset"
 
 n_points: 1000
 cluster1_center: [2.0, 2.0]
