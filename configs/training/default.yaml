@@ -1,5 +1,4 @@
 epochs: 1000
-batch_size: 128
 learning_rate: 1e-3
 weight_decay: 0.0
 
@@ -7,12 +6,8 @@ optimizer:
   type: "adam"
   betas: [0.9, 0.999]
 
-scheduler:
-  use_scheduler: false
-  type: "cosine"
-
 log_every_n_steps: 10
-sample_every_n_epochs: 100
+sample_every_n_epochs: 50
 save_every_n_epochs: 100
 
 vis_n_samples: 500

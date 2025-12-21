@@ -7,11 +7,10 @@ defaults:
 experiment_name: "ddpm_2d_baseline"
 seed: 42
 
-wandb:
-  entity: null
-  project: "diffusion_models"
-  group: "online"
+device: "cpu"
 
-output_dir: "outputs"
-save_samples: true
-save_checkpoints: true
+tensorboard:
+  log_dir: "outputs/logs"
+
+checkpoint_dir: "outputs/checkpoints"
+sample_dir: "outputs/samples"
