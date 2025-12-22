@@ -25,9 +25,6 @@ class FlowMatchingImage(DiffusionModel):
         v_pred = self.network(x_t, t)
 
         loss = nn.functional.mse_loss(v_pred, v_true)
-
-        loss = loss / (x0.shape[1] * x0.shape[2] * x0.shape[3])
-
         return loss
 
     @torch.no_grad()
