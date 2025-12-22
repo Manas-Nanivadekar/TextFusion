@@ -14,7 +14,7 @@ import math
 from typing import List, Tuple
 
 
-class SinusoidalPostionEmbedding(nn.Module):
+class SinusoidalPositionEmbedding(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
         self.dim = dim
@@ -125,7 +125,7 @@ class UNet(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.time_embedding = nn.Sequential(
-            SinusoidalPostionEmbedding(time_emb_dim),
+            SinusoidalPositionEmbedding(time_emb_dim),
             nn.Linear(time_emb_dim, time_emb_dim * 4),
             nn.SiLU(),
             nn.Linear(time_emb_dim * 4, time_emb_dim),
