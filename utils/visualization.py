@@ -369,7 +369,7 @@ def visualize_interpolation(
     fig, axes = plt.subplots(1, n_interp, figsize=(16, 2))
 
     for idx, (ax, img) in enumerate(zip(axes, all_samples)):
-        img_np = img.squeeze().numpy()
+        img_np = img.squeeze().detach().numpy()
         ax.imshow(img_np, cmap="gray", vmin=0, vmax=1)
         ax.axis("off")
         ax.set_title(f"α={idx/(n_interp-1):.2f}", fontsize=10)
