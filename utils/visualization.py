@@ -199,25 +199,28 @@ def visualize_mnist_samples(
         title: Title for the plot
         nrow: Number of images per row
     """
-    # Denormalize from [-1, 1] to [0, 1]
-    samples = (samples + 1) / 2
+    samples = (samples.cpu() + 1) / 2
     samples = torch.clamp(samples, 0, 1)
 
-    # Create grid
+    print(
+        f"    Sample stats after denorm: min={samples.min():.3f}, max={samples.max():.3f}, mean={samples.mean():.3f}"
+    )
+
     grid = vutils.make_grid(samples, nrow=nrow, padding=2, normalize=False)
 
-    # Plot
+    grid_np = grid.permute(1, 2, 0).squeeze().numpy()
+
     fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-    ax.imshow(grid.permute(1, 2, 0).squeeze(), cmap="gray")
+    ax.imshow(grid_np, cmap="gray", vmin=0, vmax=1)
     ax.axis("off")
-    ax.set_title(title, fontsize=16)
+    ax.set_title(title, fontsize=16, pad=20)
 
     plt.tight_layout()
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
 
-    print(f"Saved visualization to {save_path}")
+    print(f"    Saved visualization to {save_path}")
 
 
 def visualize_mnist_denoising(
@@ -228,13 +231,7 @@ def visualize_mnist_denoising(
     save_path: str = "outputs/denoising_process.png",
     device: str = "cpu",
 ):
-    """
-    Visualize the denoising process for MNIST
-
-    Shows progression from noise to clean images
-    """
     if steps_to_show is None:
-        # Show: start, 20%, 40%, 60%, 80%, end
         steps_to_show = [
             0,
             n_steps // 5,
@@ -256,6 +253,9 @@ def visualize_mnist_denoising(
 
     trajectory = trajectory.cpu()
 
+    print(f"    Trajectory shape: {trajectory.shape}")
+    print(f"    Trajectory range: [{trajectory.min():.3f}, {trajectory.max():.3f}]")
+
     fig, axes = plt.subplots(n_samples, len(steps_to_show), figsize=(15, 2 * n_samples))
     if n_samples == 1:
         axes = axes.reshape(1, -1)
@@ -264,10 +264,10 @@ def visualize_mnist_denoising(
         for col_idx, step in enumerate(steps_to_show):
             ax = axes[sample_idx, col_idx]
 
-            img = trajectory[step, sample_idx, 0]
+            img = trajectory[step, sample_idx, 0].numpy()
 
             img = (img + 1) / 2
-            img = torch.clamp(img, 0, 1)
+            img = np.clip(img, 0, 1)
 
             ax.imshow(img, cmap="gray", vmin=0, vmax=1)
             ax.axis("off")
@@ -278,10 +278,10 @@ def visualize_mnist_denoising(
 
     plt.tight_layout()
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
 
-    print(f"Saved denoising visualization to {save_path}")
+    print(f"    Saved denoising visualization to {save_path}")
 
 
 def compare_sampling_methods(
@@ -291,16 +291,13 @@ def compare_sampling_methods(
     save_path: str = "outputs/sampling_comparison.png",
     device: str = "cpu",
 ):
-    """
-    Compare sample quality with different numbers of sampling steps
-
-    Useful for understanding speed/quality tradeoff
-    """
     model.eval()
 
     fig, axes = plt.subplots(1, len(step_counts), figsize=(20, 5))
 
     for idx, n_steps in enumerate(step_counts):
+        print(f"    Generating with {n_steps} steps...")
+
         samples, _ = model.sample(
             n_samples=n_samples,
             image_shape=(1, 28, 28),
@@ -309,22 +306,25 @@ def compare_sampling_methods(
             device=device,
         )
 
-        samples = (samples + 1) / 2
+        samples = (samples.cpu() + 1) / 2
         samples = torch.clamp(samples, 0, 1)
 
-        grid = vutils.make_grid(samples.cpu(), nrow=8, padding=2, normalize=False)
+        print(f"      Sample range: [{samples.min():.3f}, {samples.max():.3f}]")
+
+        grid = vutils.make_grid(samples, nrow=8, padding=2, normalize=False)
+        grid_np = grid.permute(1, 2, 0).squeeze().numpy()
 
         ax = axes[idx]
-        ax.imshow(grid.permute(1, 2, 0).squeeze(), cmap="gray")
+        ax.imshow(grid_np, cmap="gray", vmin=0, vmax=1)
         ax.axis("off")
         ax.set_title(f"{n_steps} Steps", fontsize=14)
 
     plt.tight_layout()
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
 
-    print(f"Saved sampling comparison to {save_path}")
+    print(f"    Saved sampling comparison to {save_path}")
 
 
 def visualize_interpolation(
@@ -336,56 +336,47 @@ def visualize_interpolation(
     save_path: str = "outputs/interpolation.png",
     device: str = "cpu",
 ):
-    """
-    Interpolate between two noise vectors and generate
-
-    Shows that the latent space is continuous
-    """
     model.eval()
 
-    # Create interpolation
     alphas = torch.linspace(0, 1, n_interp, device=device)
-    interpolated_noise = []
+    all_samples = []
 
     for alpha in alphas:
         noise = (1 - alpha) * start_noise + alpha * end_noise
-        interpolated_noise.append(noise)
 
-    interpolated_noise = torch.stack(interpolated_noise)
+        x = noise.clone()
+        timesteps = torch.linspace(1, 0, n_steps + 1, device=device)
 
-    # Generate from each interpolated noise
-    # For Flow Matching, we need to manually integrate from each starting point
-    all_samples = []
+        for i in range(n_steps):
+            t_current = timesteps[i]
+            t_next = timesteps[i + 1]
+            dt = t_next - t_current
 
-    for noise in interpolated_noise:
-        # This is a simplified version - Flow Matching uses deterministic paths
-        # So same noise should give same result
-        samples, _ = model.sample(
-            n_samples=1,
-            image_shape=(1, 28, 28),
-            n_steps=n_steps,
-            return_trajectory=False,
-            device=device,
-        )
-        all_samples.append(samples[0])
+            t = torch.full((1,), t_current, device=device)
+            v_pred = model.network(x, t)
+            x = x + dt * v_pred
+
+            if model.clip_samples:
+                x = torch.clamp(x, -1, 1)
+
+        all_samples.append(x[0])
 
     all_samples = torch.stack(all_samples)
 
-    # Denormalize
-    all_samples = (all_samples + 1) / 2
+    all_samples = (all_samples.cpu() + 1) / 2
     all_samples = torch.clamp(all_samples, 0, 1)
 
-    # Plot
     fig, axes = plt.subplots(1, n_interp, figsize=(16, 2))
 
     for idx, (ax, img) in enumerate(zip(axes, all_samples)):
-        ax.imshow(img.squeeze().cpu(), cmap="gray")
+        img_np = img.squeeze().numpy()
+        ax.imshow(img_np, cmap="gray", vmin=0, vmax=1)
         ax.axis("off")
         ax.set_title(f"α={idx/(n_interp-1):.2f}", fontsize=10)
 
     plt.tight_layout()
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
 
-    print(f"Saved interpolation to {save_path}")
+    print(f"    Saved interpolation to {save_path}")
