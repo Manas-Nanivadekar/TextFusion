@@ -65,7 +65,7 @@ class ResidualBlock(nn.Module):
             else nn.Identity()
         )
 
-    def forward(self, x: torch.Tensor, t_embd: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: (batch, in_channels, H, W)
@@ -75,7 +75,7 @@ class ResidualBlock(nn.Module):
         """
         h = self.block1(x)
 
-        time_embd = self.time_mlp(t_embd)
+        time_embd = self.time_mlp(t_emb)
         h = h + time_embd[:, :, None, None]
         h = self.block2(h)
         return h + self.residual_conv(x)
