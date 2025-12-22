@@ -1,0 +1,15 @@
+network:
+  type: "UNet"
+  in_channels: 1
+  out_channels: 1
+  base_channels: 64
+  channel_multipliers: [1, 2, 4]
+  num_res_blocks: 2
+  time_emb_dim: 256
+  use_attention: true
+  dropout: 0.1
+
+sampling:
+  n_steps: 50
+  clip_samples: true
+  image_shape: [1, 28, 28]

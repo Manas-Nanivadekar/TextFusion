@@ -1,0 +1,11 @@
+dataset_type: "MNISTDataset"
+
+root: "data/mnist"
+train: true
+download: true
+normalize: true
+
+batch_size: 128
+shuffle: true
+num_workers: 4
+pin_memory: true

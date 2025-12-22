@@ -1,0 +1,16 @@
+defaults:
+  - model: flow_matching_mnist
+  - data: mnist
+  - training: mnist
+  - _self_
+
+experiment_name: "flow_matching_mnist"
+seed: 42
+
+device: "cpu"
+
+tensorboard:
+  log_dir: "outputs/logs_mnist"
+
+checkpoint_dir: "outputs/checkpoints_mnist"
+sample_dir: "outputs/samples_mnist"
