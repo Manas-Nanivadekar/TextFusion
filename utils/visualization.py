@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+import torchvision.utils as vutils
+
 
 @torch.no_grad()
 def visualize_score_field(
@@ -180,3 +182,210 @@ def visualize_denoising_process(
     print(f"Denoising process visualization saved to {save_path}")
 
     return fig
+
+
+def visualize_mnist_samples(
+    samples: torch.Tensor,
+    save_path: str,
+    title: str = "Generated MNIST Samples",
+    nrow: int = 8,
+):
+    """
+    Visualize a grid of MNIST samples
+
+    Args:
+        samples: (N, 1, 28, 28) tensor in [-1, 1]
+        save_path: Where to save the image
+        title: Title for the plot
+        nrow: Number of images per row
+    """
+    # Denormalize from [-1, 1] to [0, 1]
+    samples = (samples + 1) / 2
+    samples = torch.clamp(samples, 0, 1)
+
+    # Create grid
+    grid = vutils.make_grid(samples, nrow=nrow, padding=2, normalize=False)
+
+    # Plot
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    ax.imshow(grid.permute(1, 2, 0).squeeze(), cmap="gray")
+    ax.axis("off")
+    ax.set_title(title, fontsize=16)
+
+    plt.tight_layout()
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    print(f"Saved visualization to {save_path}")
+
+
+def visualize_mnist_denoising(
+    model,
+    n_samples: int = 8,
+    n_steps: int = 50,
+    steps_to_show: list = None,
+    save_path: str = "outputs/denoising_process.png",
+    device: str = "cpu",
+):
+    """
+    Visualize the denoising process for MNIST
+
+    Shows progression from noise to clean images
+    """
+    if steps_to_show is None:
+        # Show: start, 20%, 40%, 60%, 80%, end
+        steps_to_show = [
+            0,
+            n_steps // 5,
+            2 * n_steps // 5,
+            3 * n_steps // 5,
+            4 * n_steps // 5,
+            n_steps,
+        ]
+
+    model.eval()
+
+    samples, trajectory = model.sample(
+        n_samples=n_samples,
+        image_shape=(1, 28, 28),
+        n_steps=n_steps,
+        return_trajectory=True,
+        device=device,
+    )
+
+    trajectory = trajectory.cpu()
+
+    fig, axes = plt.subplots(n_samples, len(steps_to_show), figsize=(15, 2 * n_samples))
+    if n_samples == 1:
+        axes = axes.reshape(1, -1)
+
+    for sample_idx in range(n_samples):
+        for col_idx, step in enumerate(steps_to_show):
+            ax = axes[sample_idx, col_idx]
+
+            img = trajectory[step, sample_idx, 0]
+
+            img = (img + 1) / 2
+            img = torch.clamp(img, 0, 1)
+
+            ax.imshow(img, cmap="gray", vmin=0, vmax=1)
+            ax.axis("off")
+
+            if sample_idx == 0:
+                t_val = 1 - step / n_steps
+                ax.set_title(f"Step {step}\nt={t_val:.2f}", fontsize=10)
+
+    plt.tight_layout()
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    print(f"Saved denoising visualization to {save_path}")
+
+
+def compare_sampling_methods(
+    model,
+    n_samples: int = 64,
+    step_counts: list = [10, 25, 50, 100],
+    save_path: str = "outputs/sampling_comparison.png",
+    device: str = "cpu",
+):
+    """
+    Compare sample quality with different numbers of sampling steps
+
+    Useful for understanding speed/quality tradeoff
+    """
+    model.eval()
+
+    fig, axes = plt.subplots(1, len(step_counts), figsize=(20, 5))
+
+    for idx, n_steps in enumerate(step_counts):
+        samples, _ = model.sample(
+            n_samples=n_samples,
+            image_shape=(1, 28, 28),
+            n_steps=n_steps,
+            return_trajectory=False,
+            device=device,
+        )
+
+        samples = (samples + 1) / 2
+        samples = torch.clamp(samples, 0, 1)
+
+        grid = vutils.make_grid(samples.cpu(), nrow=8, padding=2, normalize=False)
+
+        ax = axes[idx]
+        ax.imshow(grid.permute(1, 2, 0).squeeze(), cmap="gray")
+        ax.axis("off")
+        ax.set_title(f"{n_steps} Steps", fontsize=14)
+
+    plt.tight_layout()
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    print(f"Saved sampling comparison to {save_path}")
+
+
+def visualize_interpolation(
+    model,
+    start_noise: torch.Tensor,
+    end_noise: torch.Tensor,
+    n_interp: int = 8,
+    n_steps: int = 50,
+    save_path: str = "outputs/interpolation.png",
+    device: str = "cpu",
+):
+    """
+    Interpolate between two noise vectors and generate
+
+    Shows that the latent space is continuous
+    """
+    model.eval()
+
+    # Create interpolation
+    alphas = torch.linspace(0, 1, n_interp, device=device)
+    interpolated_noise = []
+
+    for alpha in alphas:
+        noise = (1 - alpha) * start_noise + alpha * end_noise
+        interpolated_noise.append(noise)
+
+    interpolated_noise = torch.stack(interpolated_noise)
+
+    # Generate from each interpolated noise
+    # For Flow Matching, we need to manually integrate from each starting point
+    all_samples = []
+
+    for noise in interpolated_noise:
+        # This is a simplified version - Flow Matching uses deterministic paths
+        # So same noise should give same result
+        samples, _ = model.sample(
+            n_samples=1,
+            image_shape=(1, 28, 28),
+            n_steps=n_steps,
+            return_trajectory=False,
+            device=device,
+        )
+        all_samples.append(samples[0])
+
+    all_samples = torch.stack(all_samples)
+
+    # Denormalize
+    all_samples = (all_samples + 1) / 2
+    all_samples = torch.clamp(all_samples, 0, 1)
+
+    # Plot
+    fig, axes = plt.subplots(1, n_interp, figsize=(16, 2))
+
+    for idx, (ax, img) in enumerate(zip(axes, all_samples)):
+        ax.imshow(img.squeeze().cpu(), cmap="gray")
+        ax.axis("off")
+        ax.set_title(f"α={idx/(n_interp-1):.2f}", fontsize=10)
+
+    plt.tight_layout()
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    print(f"Saved interpolation to {save_path}")
