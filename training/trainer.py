@@ -128,6 +128,30 @@ class DiffusionTrainer:
         )
         samples_ode = samples_ode.cpu()
 
+        if (epoch + 1) % sample_every == 0:
+            print(f"  Generating samples...")
+
+            # Check if we're working with images or 2D data
+            sample_batch = next(iter(self.train_loader))
+            if isinstance(sample_batch, (list, tuple)):
+                sample_data = sample_batch[0]
+            else:
+                sample_data = sample_batch
+
+            if len(sample_data.shape) == 4:  # Images (B, C, H, W)
+                self.visualize_samples_images(
+                    epoch=epoch,
+                    n_samples=vis_n_samples,
+                    n_trajectories=vis_n_trajectories,
+                    image_shape=tuple(sample_data.shape[1:]),
+                )
+            else:  # 2D data (B, 2)
+                self.visualize_samples(
+                    epoch=epoch,
+                    n_samples=vis_n_samples,
+                    n_trajectories=vis_n_trajectories,
+                )
+
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         axes[0, 0].scatter(data[:, 0], data[:, 1], alpha=0.5, s=10, c="blue")
         axes[0, 0].set_xlim(-4, 4)
@@ -224,3 +248,55 @@ class DiffusionTrainer:
 
         print(f"Loaded checkpoint from epoch {self.epoch}")
         return checkpoint
+
+    # training/trainer.py - Add this method to DiffusionTrainer class
+
+
+@torch.no_grad()
+def visualize_samples_images(
+    self,
+    epoch: int,
+    n_samples: int = 64,
+    n_trajectories: int = 16,
+    image_shape: tuple = (1, 28, 28),
+):
+    """Generate and visualize image samples"""
+    self.model.eval()
+
+    # Determine grid size
+    grid_size = int(n_samples**0.5)
+
+    # Sample images
+    samples, _ = self.model.sample(
+        n_samples=n_samples,
+        image_shape=image_shape,
+        n_steps=50,
+        return_trajectory=False,
+        device=self.device,
+    )
+    samples = samples.cpu()
+
+    # Denormalize from [-1, 1] to [0, 1]
+    samples = (samples + 1) / 2
+    samples = torch.clamp(samples, 0, 1)
+
+    # Create grid
+    import torchvision.utils as vutils
+
+    grid = vutils.make_grid(samples, nrow=grid_size, padding=2, normalize=False)
+
+    # Plot
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    ax.imshow(grid.permute(1, 2, 0).squeeze(), cmap="gray")
+    ax.axis("off")
+    ax.set_title(f"Generated Samples (Epoch {epoch})", fontsize=16)
+
+    # Save
+    save_path = self.sample_dir / f"samples_epoch_{epoch:04d}.png"
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    # Log to TensorBoard
+    self.writer.add_image("samples", grid, epoch)
+
+    print(f"    → Samples saved to {save_path}")
