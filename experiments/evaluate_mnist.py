@@ -30,7 +30,7 @@ def evaluate_model(
         out_channels=1,
         base_channels=64,
         channel_multipliers=[1, 2, 4],
-        num_res_block=2,
+        num_res_blocks=2,
         time_emb_dim=256,
         use_attention=True,
         dropout=0.1,
