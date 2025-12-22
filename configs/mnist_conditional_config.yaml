@@ -1,0 +1,16 @@
+defaults:
+  - model: flow_matching_mnist_conditional
+  - data: mnist
+  - training: mnist
+  - _self_
+
+experiment_name: "flow_matching_mnist_conditional"
+seed: 42
+
+device: "cuda"
+
+tensorboard:
+  log_dir: "outputs/logs_mnist_conditional"
+
+checkpoint_dir: "outputs/checkpoints_mnist_conditional"
+sample_dir: "outputs/samples_mnist_conditional"
