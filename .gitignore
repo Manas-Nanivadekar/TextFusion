@@ -52,4 +52,5 @@ events.out.tfevents.*
 data/downloads/
 data/raw/
 *.zip
-*.tar.gz
+*.tar.gz'
+mnist
