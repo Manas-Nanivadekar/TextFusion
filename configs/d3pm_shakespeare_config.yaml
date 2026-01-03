@@ -1,0 +1,16 @@
+defaults:
+  - model: d3pm_shakespeare
+  - data: shakespeare
+  - training: d3pm
+  - _self_
+
+experiment_name: "d3pm_shakespeare"
+seed: 42
+
+device: "cpu"
+
+tensorboard:
+  log_dir: "outputs/logs_d3pm"
+
+checkpoint_dir: "outputs/checkpoints_d3pm"
+sample_dir: "outputs/samples_d3pm"

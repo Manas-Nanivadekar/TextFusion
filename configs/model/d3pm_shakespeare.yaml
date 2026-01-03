@@ -1,0 +1,15 @@
+network:
+  type: "TransformerD3PM"
+  vocab_size: 3000
+  embed_dim: 256
+  num_layers: 6
+  num_heads: 8
+  ff_dim: 1024
+  max_seq_len: 128
+  dropout: 0.1
+  time_emb_dim: 256
+
+schedule_type: "linear" # linear, cosine, or sqrt
+
+sampling:
+  n_steps: 50
