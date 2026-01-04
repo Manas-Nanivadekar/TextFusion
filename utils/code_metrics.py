@@ -1,3 +1,10 @@
+"""
+Code-specific evaluation metrics for code generation models.
+
+Provides syntax validation, structural analysis, and code infilling evaluation
+for assessing quality of generated Python code.
+"""
+
 import ast
 import subprocess
 from typing import List, Dict
@@ -8,6 +15,18 @@ from pathlib import Path
 
 
 def check_syntax_valid(code: str) -> bool:
+    """
+    Check if Python code is syntactically valid.
+
+    Uses AST parser to verify syntax without executing code.
+    Critical for code generation - syntactically invalid code is unusable.
+
+    Args:
+        code: Python source code string
+
+    Returns:
+        True if code parses successfully, False otherwise
+    """
     try:
         ast.parse(code)
         return True
@@ -16,6 +35,18 @@ def check_syntax_valid(code: str) -> bool:
 
 
 def compute_syntax_validity(samples: List[str]) -> Dict[str, float]:
+    """
+    Compute syntax validity rate across code samples.
+
+    Primary quality metric for code generation models. Syntax validity is
+    a minimum bar - invalid code cannot be used regardless of semantic quality.
+
+    Args:
+        samples: List of generated Python code strings
+
+    Returns:
+        Dictionary with validity statistics and first few error messages
+    """
     valid_count = 0
     syntax_errors = []
 
@@ -39,6 +70,22 @@ def compute_syntax_validity(samples: List[str]) -> Dict[str, float]:
 
 
 def check_execution_safe(code: str, timeout: int = 5) -> Dict[str, any]:
+    """
+    Execute Python code in isolated subprocess and check for errors.
+
+    WARNING: Only use with trusted code or in sandboxed environment.
+    Executes arbitrary Python code which could be malicious.
+
+    Useful for checking if syntactically valid code also runs without errors,
+    though semantic correctness requires more sophisticated evaluation.
+
+    Args:
+        code: Python source code to execute
+        timeout: Maximum execution time in seconds
+
+    Returns:
+        Dictionary with execution status, return code, stdout/stderr
+    """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         temp_path = f.name
@@ -70,6 +117,20 @@ def check_execution_safe(code: str, timeout: int = 5) -> Dict[str, any]:
 
 
 def analyze_code_structure(code: str) -> Dict[str, any]:
+    """
+    Analyze structural properties of Python code using AST.
+
+    Counts syntactic elements to assess code complexity and completeness.
+    Useful for verifying generated code has expected structure (e.g., contains
+    functions, classes, etc.) rather than just simple expressions.
+
+    Args:
+        code: Python source code string
+
+    Returns:
+        Dictionary with counts of functions, classes, loops, etc.
+        Returns {'valid': False} if code doesn't parse
+    """
     try:
         tree = ast.parse(code)
     except SyntaxError:
@@ -106,6 +167,27 @@ def analyze_code_structure(code: str) -> Dict[str, any]:
 def evaluate_infilling_quality(
     model, test_examples: List[Dict], tokenizer, device: str = "cpu"
 ) -> Dict[str, float]:
+    """
+    Evaluate model's ability to fill in masked code regions.
+
+    Tests code infilling task: given context before and after a gap, predict
+    the missing code. Particularly relevant for D3PM which naturally handles
+    bidirectional context unlike autoregressive models.
+
+    Metrics:
+    - Exact match: Predicted code exactly matches ground truth
+    - Token accuracy: Fraction of correctly predicted tokens
+    - Syntax validity: Whether predicted code is syntactically valid
+
+    Args:
+        model: D3PM model with sample() method
+        test_examples: List of dicts with 'before', 'masked', 'after' keys
+        tokenizer: Tokenizer with encode/decode methods
+        device: Device for inference
+
+    Returns:
+        Dictionary with infilling quality metrics
+    """
     model.eval()
 
     results = {

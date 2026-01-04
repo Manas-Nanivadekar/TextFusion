@@ -1,3 +1,10 @@
+"""
+Evaluation metrics for generative text models.
+
+Provides perplexity and diversity metrics for assessing quality of generated
+text from diffusion models, autoregressive models, etc.
+"""
+
 import torch
 import torch.nn as nn
 import math
@@ -7,6 +14,24 @@ import numpy as np
 
 
 def compute_perplexity(model, dataloader, device: str = "cpu") -> float:
+    """
+    Compute perplexity for diffusion models.
+
+    Estimates how well the model predicts the data by evaluating loss at
+    intermediate noise levels (t ~ 0.5). Lower perplexity = better fit.
+
+    Note: For diffusion models, this is an approximation. Traditional perplexity
+    is designed for autoregressive models. We evaluate at t=0.5 to measure
+    denoising capability rather than generation likelihood.
+
+    Args:
+        model: Diffusion model with compute_loss() method
+        dataloader: DataLoader providing tokenized sequences
+        device: Device for computation
+
+    Returns:
+        Perplexity score (exp of average loss)
+    """
     model.eval()
     total_loss = 0.0
     total_tokens = 0
@@ -20,17 +45,20 @@ def compute_perplexity(model, dataloader, device: str = "cpu") -> float:
 
             batch_size, seq_len = tokens.shape
 
+            # Evaluate at moderate noise level (t ~ 0.5)
+            # Avoids extremes where task is too easy (t≈0) or too hard (t≈1)
             t = torch.rand(batch_size, device=device) * 0.5
 
             loss = model.compute_loss(tokens, t)
 
+            # Count only non-padding tokens
             non_pad = (tokens != 0).sum().item()
 
             total_loss += loss.item() * non_pad
             total_tokens += non_pad
 
     avg_loss = total_loss / total_tokens
-    perplexity = math.exp(avg_loss)
+    perplexity = math.exp(avg_loss)  # Convert log-likelihood to perplexity
 
     model.train()
 
@@ -102,6 +130,25 @@ def compute_sample_perplexity(samples: List[str], dataset) -> float:
 
 
 def compute_diversity_metrics(samples: List[str]) -> Dict[str, float]:
+    """
+    Measure diversity and repetition in generated samples.
+
+    Diversity metrics detect mode collapse (model generating similar outputs)
+    and repetition issues common in generation models.
+
+    Metrics:
+    - Unique n-grams: Vocabulary richness
+    - N-gram diversity: Ratio of unique to total n-grams (higher = more diverse)
+    - Repetition rate: Fraction of consecutive repeated tokens (lower = better)
+    - Self-BLEU: Average BLEU between samples (lower = more diverse)
+    - Vocab size: Number of unique tokens
+
+    Args:
+        samples: List of generated text strings
+
+    Returns:
+        Dictionary of diversity metrics
+    """
     if not samples:
         return {}
 
@@ -161,6 +208,22 @@ def compute_diversity_metrics(samples: List[str]) -> Dict[str, float]:
 
 
 def compute_self_bleu(tokenized_samples: List[List[str]], n: int = 4) -> float:
+    """
+    Compute Self-BLEU: average BLEU score between generated samples.
+
+    Self-BLEU measures diversity - lower scores indicate more diverse outputs.
+    Each sample is compared against all others as references.
+
+    High Self-BLEU (>0.8): Model generates similar outputs (mode collapse)
+    Low Self-BLEU (<0.3): Model generates diverse outputs
+
+    Args:
+        tokenized_samples: List of tokenized sequences
+        n: Maximum n-gram size (typically 4)
+
+    Returns:
+        Average Self-BLEU score across all samples
+    """
     if len(tokenized_samples) < 2:
         return 0.0
 

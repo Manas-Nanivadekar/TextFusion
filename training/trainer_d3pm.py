@@ -1,3 +1,10 @@
+"""
+Training infrastructure for D3PM models.
+
+Handles training loop, checkpointing, logging, and sample generation for
+discrete diffusion models. Designed for text/code generation tasks.
+"""
+
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -8,6 +15,25 @@ from typing import Dict, Any
 
 
 class D3PMTrainer:
+    """
+    Training manager for D3PM discrete diffusion models.
+
+    Features:
+    - Gradient clipping for training stability
+    - TensorBoard logging
+    - Automatic checkpointing (latest + best)
+    - Periodic sample generation for monitoring quality
+
+    Args:
+        model: D3PM model instance
+        train_loader: DataLoader providing tokenized sequences
+        optimizer: PyTorch optimizer (typically AdamW)
+        device: Device for training ('cpu', 'cuda', 'mps')
+        log_dir: TensorBoard log directory
+        checkpoint_dir: Directory for saving model checkpoints
+        sample_dir: Directory for generated samples
+        dataset: Optional dataset with decode() method for visualization
+    """
     def __init__(
         self,
         model,
@@ -41,6 +67,12 @@ class D3PMTrainer:
         print("D3PM Trainer initialized")
 
     def train_epoch(self) -> Dict[str, float]:
+        """
+        Run one training epoch.
+
+        Returns:
+            Dictionary with average loss over epoch
+        """
         self.model.train()
         epoch_loss = 0
         num_batches = 0
@@ -49,8 +81,11 @@ class D3PMTrainer:
         for tokens in pbar:
             tokens = tokens.to(self.device)
 
+            # Forward pass and loss computation
             loss = self.model.compute_loss(tokens)
 
+            # Backward pass with gradient clipping
+            # Clipping prevents gradient explosion common in diffusion models
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -62,6 +97,7 @@ class D3PMTrainer:
 
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
+            # Frequent logging for monitoring training dynamics
             if self.global_step % 10 == 0:
                 self.writer.add_scalar("train/loss_step", loss.item(), self.global_step)
 
@@ -102,6 +138,18 @@ class D3PMTrainer:
 
     @torch.no_grad()
     def generate_samples(self, epoch: int, n_samples: int, seq_len: int, n_steps: int):
+        """
+        Generate samples for qualitative evaluation.
+
+        Saves decoded text samples to file for manual inspection of model quality.
+        Particularly important for text/code where metrics don't tell the full story.
+
+        Args:
+            epoch: Current epoch number (for filename)
+            n_samples: Number of samples to generate
+            seq_len: Sequence length to generate
+            n_steps: Number of denoising steps (more = higher quality)
+        """
         self.model.eval()
 
         samples, _ = self.model.sample(
