@@ -2,6 +2,8 @@ import ast
 import subprocess
 from typing import List, Dict
 import tempfile
+import numpy as np
+import torch
 from pathlib import Path
 
 
@@ -99,6 +101,67 @@ def analyze_code_structure(code: str) -> Dict[str, any]:
             stats["num_conditionals"] += 1
 
     return stats
+
+
+def evaluate_infilling_quality(
+    model, test_examples: List[Dict], tokenizer, device: str = "cpu"
+) -> Dict[str, float]:
+    model.eval()
+
+    results = {
+        "exact_match": 0,
+        "token_accuracy": [],
+        "syntax_valid": 0,
+        "total": len(test_examples),
+    }
+
+    for example in test_examples:
+        true_masked = example["masked"]
+
+        before_tokens = tokenizer.encode(example["before"])
+        after_tokens = tokenizer.encode(example["after"])
+
+        mask_len = len(tokenizer.encode(true_masked))
+
+        mask_tokens = [tokenizer.vocab["<MASK>"]] * mask_len
+        full_input = before_tokens + mask_tokens + after_tokens
+
+        max_len = 1024
+        if len(full_input) > max_len:
+            continue
+
+        full_input += [tokenizer.vocab["<PAD>"]] * (max_len - len(full_input))
+
+        with torch.no_grad():
+            input_tensor = torch.tensor([full_input], device=device)
+
+            output, _ = model.sample(
+                n_samples=1, seq_len=len(full_input), n_steps=50, device=device
+            )
+
+        pred_tokens = output[0, len(before_tokens) : len(before_tokens) + mask_len]
+        pred_code = tokenizer.decode(pred_tokens.cpu().tolist())
+
+        if pred_code.strip() == true_masked.strip():
+            results["exact_match"] += 1
+
+        true_tokens = tokenizer.encode(true_masked)
+        pred_tokens_list = pred_tokens.cpu().tolist()
+
+        matches = sum(1 for t1, t2 in zip(true_tokens, pred_tokens_list) if t1 == t2)
+        accuracy = matches / max(len(true_tokens), 1)
+        results["token_accuracy"].append(accuracy)
+
+        if check_syntax_valid(pred_code):
+            results["syntax_valid"] += 1
+
+    return {
+        "exact_match_rate": results["exact_match"] / results["total"],
+        "avg_token_accuracy": (
+            np.mean(results["token_accuracy"]) if results["token_accuracy"] else 0.0
+        ),
+        "syntax_validity": results["syntax_valid"] / results["total"],
+    }
 
 
 if __name__ == "__main__":
