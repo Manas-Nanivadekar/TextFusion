@@ -1,0 +1,11 @@
+dataset_type: "CodeDataset"
+
+data_dir: "data/code"
+max_seq_len: 64
+vocab_size: 3000
+
+# DataLoader
+batch_size: 128
+shuffle: true
+num_workers: 4
+pin_memory: false
