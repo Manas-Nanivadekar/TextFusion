@@ -1,6 +1,3 @@
-# experiments/evaluate_code.py
-"""Evaluate code generation model"""
-
 import torch
 import argparse
 from pathlib import Path
@@ -26,13 +23,11 @@ def evaluate_code_model(
     print("Evaluating Code D3PM Model")
     print("=" * 60)
 
-    # Load tokenizer
     print("\nLoading tokenizer...")
     tokenizer = CodeBPETokenizer()
     tokenizer.load("data/code_tokenizer.json")
     print(f"  Vocab size: {tokenizer.vocab_size}")
 
-    # Load test dataset
     print("\nLoading test dataset...")
     dataset = PythonCodeDataset(
         data_source=".",
@@ -43,7 +38,6 @@ def evaluate_code_model(
     )
     print(f"  Test examples: {len(dataset)}")
 
-    # Build model
     print("\nBuilding model...")
     network = TransformerD3PM(
         vocab_size=tokenizer.vocab_size,
@@ -62,7 +56,6 @@ def evaluate_code_model(
         schedule_type="linear",
     ).to(device)
 
-    # Load checkpoint if provided
     if checkpoint_path and Path(checkpoint_path).exists():
         print(f"Loading checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -70,7 +63,6 @@ def evaluate_code_model(
     else:
         print("No checkpoint - evaluating untrained model")
 
-    # Generate samples
     print("\n" + "=" * 60)
     print("Generating Code Samples...")
     print("=" * 60)
@@ -81,23 +73,20 @@ def evaluate_code_model(
             n_samples=n_samples, seq_len=512, n_steps=50, device=device
         )
 
-    # Decode
     samples_code = []
     for i in range(n_samples):
         tokens = samples_tokens[i].cpu().tolist()
-        # Remove padding
         tokens = [t for t in tokens if t != tokenizer.vocab["<PAD>"]]
         code = tokenizer.decode(tokens)
         samples_code.append(code)
 
-        if i < 3:  # Show first 3
+        if i < 3:
             print(f"\nSample {i+1}:")
             print("-" * 60)
             print(code[:300])
             print("...")
             print("-" * 60)
 
-    # Evaluate syntax validity
     print("\n" + "=" * 60)
     print("Syntax Validity Analysis")
     print("=" * 60)
@@ -111,7 +100,6 @@ def evaluate_code_model(
         err = validity["syntax_errors"][0]
         print(f"  Sample {err['sample_idx']}: {err['error']}")
 
-    # Analyze structure
     print("\n" + "=" * 60)
     print("Code Structure Analysis")
     print("=" * 60)
@@ -130,7 +118,6 @@ def evaluate_code_model(
         print(f"  Classes: {avg_classes:.1f}")
         print(f"  Lines: {avg_lines:.1f}")
 
-    # Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
