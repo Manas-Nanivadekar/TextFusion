@@ -126,6 +126,8 @@ def unmask_top_k(
     num_special_tokens: int = 5,
     temperature: float = 1.0,
     sample: bool = True,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.2,
 ) -> torch.Tensor:
     """
     Unmask top-k most confident predictions (reverse diffusion step).
@@ -154,31 +156,43 @@ def unmask_top_k(
     batch_size, seq_len, vocab_size = logits.shape
     device = tokens.device
 
-    # Mask out special tokens
     logits = logits.clone()
     logits[:, :, :num_special_tokens] = float("-inf")
 
-    # Apply temperature
+    # Apply repetition penalty - reduce logits for tokens already in sequence
+    for i in range(batch_size):
+        unique_tokens = tokens[i].unique()
+        unique_tokens = unique_tokens[unique_tokens >= num_special_tokens]
+        if len(unique_tokens) > 0:
+            logits[i, :, unique_tokens] = (
+                logits[i, :, unique_tokens] / repetition_penalty
+            )
+
+    # Temperature
     logits = logits / temperature
 
     probs = torch.softmax(logits, dim=-1)
 
-    if sample:
-        # STOCHASTIC: Sample from the distribution
-        # Reshape for sampling: (batch * seq_len, vocab_size)
-        flat_probs = probs.view(-1, vocab_size)
-        predicted_tokens = torch.multinomial(flat_probs, num_samples=1).squeeze(-1)
-        predicted_tokens = predicted_tokens.view(batch_size, seq_len)
+    # Top-p (nucleus) sampling
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+    cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
 
-        # Get confidence of the sampled tokens
-        confidence = probs.gather(dim=-1, index=predicted_tokens.unsqueeze(-1)).squeeze(
-            -1
-        )
-    else:
-        # DETERMINISTIC: Use argmax (causes mode collapse!)
-        confidence, predicted_tokens = probs.max(dim=-1)
+    # Find cutoff: keep tokens until cumsum > top_p
+    sorted_mask = cumsum_probs - sorted_probs > top_p
+    sorted_probs[sorted_mask] = 0.0
+    sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True)  # Renormalize
 
-    # Only consider masked positions for unmasking
+    # Sample from filtered distribution
+    predicted_tokens = torch.zeros(batch_size, seq_len, dtype=torch.long, device=device)
+    confidence = torch.zeros(batch_size, seq_len, device=device)
+
+    for i in range(batch_size):
+        for j in range(seq_len):
+            if sorted_probs[i, j].sum() > 0:
+                idx = torch.multinomial(sorted_probs[i, j], 1)
+                predicted_tokens[i, j] = sorted_indices[i, j, idx]
+                confidence[i, j] = probs[i, j, predicted_tokens[i, j]]
+
     is_masked = tokens == mask_token_id
     confidence = confidence.masked_fill(~is_masked, -float("inf"))
 
@@ -188,7 +202,6 @@ def unmask_top_k(
         masked_positions = torch.where(is_masked[i])[0]
         if len(masked_positions) == 0:
             continue
-
         num_unmask = min(k, len(masked_positions))
         _, top_k_idx = torch.topk(confidence[i, masked_positions], num_unmask)
         positions_to_unmask = masked_positions[top_k_idx]
