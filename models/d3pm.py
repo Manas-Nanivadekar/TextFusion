@@ -32,6 +32,7 @@ class D3PM(DiffusionModel):
         pad_token_id: Padding token ID (excluded from masking and loss computation)
         schedule_type: Corruption schedule ('linear', 'cosine', 'sqrt')
     """
+
     def __init__(
         self,
         network: nn.Module,
@@ -164,7 +165,14 @@ class D3PM(DiffusionModel):
 
             # Unmask top-k most confident predictions
             # This implements the confidence-based ordering unique to D3PM
-            tokens = unmask_top_k(tokens, logits, k, self.mask_token_id)
+            tokens = unmask_top_k(
+                tokens,
+                logits,
+                k,
+                self.mask_token_id,
+                num_special_tokens=5,
+                temperature=0.9,
+            )
 
             if return_trajectory:
                 trajectory.append(tokens.clone())

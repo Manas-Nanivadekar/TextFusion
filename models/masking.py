@@ -119,7 +119,13 @@ def apply_mask(
 
 
 def unmask_top_k(
-    tokens: torch.Tensor, logits: torch.Tensor, k: int, mask_token_id: int
+    tokens: torch.Tensor,
+    logits: torch.Tensor,
+    k: int,
+    mask_token_id: int,
+    num_special_tokens: int = 5,
+    temperature: float = 1.0,
+    sample: bool = True,
 ) -> torch.Tensor:
     """
     Unmask top-k most confident predictions (reverse diffusion step).
@@ -145,34 +151,50 @@ def unmask_top_k(
     Returns:
         (batch, seq_len) tokens with k highest-confidence masks replaced
     """
-    batch_size = tokens.shape[0]
+    batch_size, seq_len, vocab_size = logits.shape
     device = tokens.device
 
-    # Compute prediction confidence (max softmax probability)
-    probs = torch.softmax(logits, dim=-1)
-    confidence, predicted_tokens = probs.max(dim=-1)
+    # Mask out special tokens
+    logits = logits.clone()
+    logits[:, :, :num_special_tokens] = float("-inf")
 
-    # Only consider confidence at masked positions
+    # Apply temperature
+    logits = logits / temperature
+
+    probs = torch.softmax(logits, dim=-1)
+
+    if sample:
+        # STOCHASTIC: Sample from the distribution
+        # Reshape for sampling: (batch * seq_len, vocab_size)
+        flat_probs = probs.view(-1, vocab_size)
+        predicted_tokens = torch.multinomial(flat_probs, num_samples=1).squeeze(-1)
+        predicted_tokens = predicted_tokens.view(batch_size, seq_len)
+
+        # Get confidence of the sampled tokens
+        confidence = probs.gather(dim=-1, index=predicted_tokens.unsqueeze(-1)).squeeze(
+            -1
+        )
+    else:
+        # DETERMINISTIC: Use argmax (causes mode collapse!)
+        confidence, predicted_tokens = probs.max(dim=-1)
+
+    # Only consider masked positions for unmasking
     is_masked = tokens == mask_token_id
     confidence = confidence.masked_fill(~is_masked, -float("inf"))
 
-    unmask = tokens.clone()
+    unmasked = tokens.clone()
 
-    # Per-sample top-k selection
     for i in range(batch_size):
         masked_positions = torch.where(is_masked[i])[0]
         if len(masked_positions) == 0:
             continue
 
-        # Handle case where k > number of remaining masks
         num_unmask = min(k, len(masked_positions))
         _, top_k_idx = torch.topk(confidence[i, masked_positions], num_unmask)
-        position_to_unmask = masked_positions[top_k_idx]
+        positions_to_unmask = masked_positions[top_k_idx]
+        unmasked[i, positions_to_unmask] = predicted_tokens[i, positions_to_unmask]
 
-        # Replace [MASK] with predicted token at selected positions
-        unmask[i, position_to_unmask] = predicted_tokens[i, position_to_unmask]
-
-    return unmask
+    return unmasked
 
 
 if __name__ == "__main__":
