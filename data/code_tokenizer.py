@@ -1,165 +1,196 @@
 import re
-from typing import List, Dict
-from collections import Counter
-from pathlib import Path
 import json
+from pathlib import Path
+from collections import Counter
+from typing import Optional
 
 
 class CodeBPETokenizer:
-    def __init__(self, vocab_size: int = 5000):
+    def __init__(self, vocab_size: int = 16000):
         self.vocab_size = vocab_size
-        self.special_tokens = {
-            "<PAD>": 0,
-            "<MASK>": 1,
-            "<UNK>": 2,
-            "<BOS>": 3,
-            "<EOS>": 4,
-        }
-
-        self.vocab = self.special_tokens.copy()
+        self.special_tokens = ["<PAD>", "<MASK>", "<UNK>", "<BOS>", "<EOS>"]
+        self.vocab = {t: i for i, t in enumerate(self.special_tokens)}
         self.merges = {}
-        self.idx_to_token = {v: k for k, v in self.vocab.items()}
+        self.idx_to_token = {i: t for t, i in self.vocab.items()}
 
-    def pre_tokenize(self, code: str) -> List[str]:
-        pattern = r"(\s+|[+\-*/%=<>!&|^~]|[(){}\[\],.:;])"
+    def pre_tokenize(self, code: str) -> list[str]:
+        """Split code into words, keeping operators and punctuation separate."""
+        # Split on whitespace and operators, keep delimiters
+        pattern = (
+            r'(\s+|[+\-*/%=<>!&|^~]+|[(){}\[\],.:;@#]|"""|\'\'\' |"[^"]*"|\'[^\']*\')'
+        )
+        parts = re.split(pattern, code)
+        # Filter empty and pure whitespace
+        return [p for p in parts if p and not p.isspace()]
 
-        tokens = re.split(pattern, code)
+    def build_vocab(
+        self, data_dir: str, vocab_size: Optional[int] = None, max_examples: int = 50000
+    ):
+        """Build BPE vocab from The Stack JSONL files or .py files."""
+        if vocab_size:
+            self.vocab_size = vocab_size
 
-        tokens = [t for t in tokens if t and not t.isspace()]
+        data_dir = Path(data_dir)
 
-        return tokens
+        # Collect code from source
+        print(f"Building BPE vocab (target size: {self.vocab_size})...")
 
-    def build_vocab_from_corpus(self, code_files: List[str], max_files: int = 100):
-        print(f"Building BPE vocab from up to {max_files} files...")
+        if (data_dir / "metadata.json").exists():
+            corpus = self._load_jsonl_corpus(data_dir, max_examples)
+        else:
+            corpus = self._load_py_corpus(data_dir, max_examples)
 
-        all_tokens = []
-        for file_path in code_files[:max_files]:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    code = f.read()
-                tokens = self.pre_tokenize(code)
-                all_tokens.extend(tokens)
-            except Exception as e:
-                continue
+        # Pre-tokenize all code
+        print("Pre-tokenizing...")
+        word_freqs = Counter()
+        for code in corpus:
+            tokens = self.pre_tokenize(code)
+            word_freqs.update(tokens)
 
-        print(f"  Total pre-tokens: {len(all_tokens):,}")
-
-        word_freqs = Counter(all_tokens)
         print(f"  Unique words: {len(word_freqs):,}")
+        print(f"  Total tokens: {sum(word_freqs.values()):,}")
 
-        base_vocab_size = min(1000, len(word_freqs))
-        most_common_words = [
-            word for word, _ in word_freqs.most_common(base_vocab_size)
-        ]
-
-        for word in most_common_words:
+        # Step 1: Add most common whole words to vocab
+        base_size = min(2000, len(word_freqs))
+        for word, _ in word_freqs.most_common(base_size):
             if word not in self.vocab:
                 self.vocab[word] = len(self.vocab)
 
-        print(f"  Base vocab (whole words): {len(self.vocab)}")
+        print(f"  Base vocab (common words): {len(self.vocab)}")
 
-        remaining_words = {w: f for w, f in word_freqs.items() if w not in self.vocab}
+        # Step 2: Build character vocab from remaining words
+        remaining = {w: f for w, f in word_freqs.items() if w not in self.vocab}
 
-        splits = {word: list(word) for word in remaining_words.keys()}
+        # Add all individual characters first
+        all_chars = set()
+        for word in remaining:
+            all_chars.update(word)
+        for char in sorted(all_chars):
+            if char not in self.vocab:
+                self.vocab[char] = len(self.vocab)
 
+        print(f"  After adding chars: {len(self.vocab)}")
+
+        # Step 3: BPE merges
+        splits = {word: list(word) for word in remaining}
         num_merges = self.vocab_size - len(self.vocab)
-        num_merges = max(num_merges, 0)
 
         print(f"  Learning {num_merges} BPE merges...")
 
         for i in range(num_merges):
-
-            pair_freqs = self._count_pairs(splits, remaining_words)
+            # Count pairs
+            pair_freqs = Counter()
+            for word, freq in remaining.items():
+                split = splits[word]
+                for j in range(len(split) - 1):
+                    pair_freqs[(split[j], split[j + 1])] += freq
 
             if not pair_freqs:
-                print(f"  No more pairs to merge (stopped at {i} merges)")
+                print(f"  No more pairs at merge {i}")
                 break
 
-            best_pair = max(pair_freqs, key=pair_freqs.get)
+            # Merge best pair
+            best = max(pair_freqs, key=pair_freqs.get)
+            merged = best[0] + best[1]
 
-            splits = self._merge_pair(best_pair, splits)
+            # Update splits
+            for word in splits:
+                split = splits[word]
+                new_split = []
+                j = 0
+                while j < len(split):
+                    if (
+                        j < len(split) - 1
+                        and split[j] == best[0]
+                        and split[j + 1] == best[1]
+                    ):
+                        new_split.append(merged)
+                        j += 2
+                    else:
+                        new_split.append(split[j])
+                        j += 1
+                splits[word] = new_split
 
-            self.merges[best_pair] = len(self.merges)
+            self.merges[best] = len(self.merges)
+            if merged not in self.vocab:
+                self.vocab[merged] = len(self.vocab)
 
-            merged_token = best_pair[0] + best_pair[1]
-            if merged_token not in self.vocab:
-                self.vocab[merged_token] = len(self.vocab)
-
-            if (i + 1) % 500 == 0:
+            if (i + 1) % 1000 == 0:
                 print(
-                    f"    Merge {i+1}/{num_merges}: '{best_pair[0]}' + '{best_pair[1]}' = '{merged_token}'"
+                    f"    Merge {i+1}: '{best[0]}' + '{best[1]}' -> '{merged}' (freq: {pair_freqs[best]})"
                 )
 
-        for word, split in splits.items():
-            for token in split:
-                if token not in self.vocab:
-                    self.vocab[token] = len(self.vocab)
+        self.idx_to_token = {i: t for t, i in self.vocab.items()}
 
-        self.idx_to_token = {v: k for k, v in self.vocab.items()}
+        print(f"  Final vocab: {len(self.vocab)}")
+        print(f"  Total merges: {len(self.merges)}")
 
-        print(f"  Final vocab size: {len(self.vocab)}")
-        print(f"  Total merges learned: {len(self.merges)}")
+        # Show some learned tokens
+        print(f"\n  Sample merged tokens:")
+        merged_tokens = [
+            t for t in self.vocab if len(t) > 3 and t not in self.special_tokens
+        ][:20]
+        print(f"    {merged_tokens}")
 
-    def _count_pairs(self, splits, word_freqs):
-        pair_freqs = Counter()
+    def _load_jsonl_corpus(self, data_dir: Path, max_examples: int) -> list[str]:
+        """Load code from The Stack JSONL format."""
+        corpus = []
+        for jsonl_file in sorted(data_dir.glob("*.jsonl")):
+            with open(jsonl_file) as f:
+                for line in f:
+                    if len(corpus) >= max_examples:
+                        print(f"  Loaded {len(corpus):,} examples from JSONL")
+                        return corpus
+                    item = json.loads(line)
+                    corpus.append(item["code"])
+        print(f"  Loaded {len(corpus):,} examples from JSONL")
+        return corpus
 
-        for word, freq in word_freqs.items():
-            split = splits[word]
-            if len(split) < 2:
+    def _load_py_corpus(self, data_dir: Path, max_examples: int) -> list[str]:
+        """Load code from .py files."""
+        corpus = []
+        skip = {".venv", "__pycache__", "site-packages", ".git"}
+        for py_file in data_dir.rglob("*.py"):
+            if any(s in py_file.parts for s in skip):
+                continue
+            if len(corpus) >= max_examples:
+                break
+            try:
+                corpus.append(py_file.read_text(encoding="utf-8"))
+            except:
+                continue
+        print(f"  Loaded {len(corpus):,} .py files")
+        return corpus
+
+    def encode(self, text: str) -> list[int]:
+        """Encode text to token IDs."""
+        words = self.pre_tokenize(text)
+
+        ids = []
+        for word in words:
+            # Check if whole word in vocab
+            if word in self.vocab:
+                ids.append(self.vocab[word])
                 continue
 
-            for i in range(len(split) - 1):
-                pair = (split[i], split[i + 1])
-                pair_freqs[pair] += freq
-
-        return pair_freqs
-
-    def _merge_pair(self, pair, splits):
-        new_splits = {}
-
-        for word, split in splits.items():
-            if len(split) < 2:
-                new_splits[word] = split
-                continue
-
-            new_split = []
-            i = 0
-            while i < len(split):
-                if i < len(split) - 1 and (split[i], split[i + 1]) == pair:
-                    new_split.append(split[i] + split[i + 1])
-                    i += 2
-                else:
-                    new_split.append(split[i])
-                    i += 1
-
-            new_splits[word] = new_split
-
-        return new_splits
-
-    def encode(self, code: str) -> List[int]:
-        tokens = self.pre_tokenize(code)
-
-        encoded = []
-        for token in tokens:
-            chars = list(token)
+            # BPE encode
+            chars = list(word)
 
             while len(chars) > 1:
+                # Find mergeable pairs
                 pairs = [(chars[i], chars[i + 1]) for i in range(len(chars) - 1)]
+                mergeable = [(p, self.merges[p]) for p in pairs if p in self.merges]
 
-                applicable_merges = [
-                    (pair, self.merges[pair]) for pair in pairs if pair in self.merges
-                ]
-
-                if not applicable_merges:
+                if not mergeable:
                     break
 
-                pair_to_merge = min(applicable_merges, key=lambda x: x[1])[0]
+                # Apply earliest learned merge
+                best_pair = min(mergeable, key=lambda x: x[1])[0]
 
                 new_chars = []
-
                 i = 0
                 while i < len(chars):
-                    if i < len(chars) - 1 and (chars[i], chars[i + 1]) == pair_to_merge:
+                    if i < len(chars) - 1 and (chars[i], chars[i + 1]) == best_pair:
                         new_chars.append(chars[i] + chars[i + 1])
                         i += 2
                     else:
@@ -167,100 +198,112 @@ class CodeBPETokenizer:
                         i += 1
                 chars = new_chars
 
-            for subtoken in chars:
-                encoded.append(self.vocab.get(subtoken, self.vocab["<UNK>"]))
+            # Convert to IDs
+            for token in chars:
+                ids.append(self.vocab.get(token, self.vocab["<UNK>"]))
 
-        return encoded
+        return ids
 
-    def decode(self, token_ids: List[int]) -> str:
-        tokens = [self.idx_to_token.get(idx, "<UNK>") for idx in token_ids]
+    def decode(self, ids: list[int]) -> str:
+        """Decode token IDs to text."""
+        tokens = []
+        for idx in ids:
+            token = self.idx_to_token.get(idx, "<UNK>")
+            if token not in self.special_tokens:
+                tokens.append(token)
 
-        tokens = [t for t in tokens if t not in self.special_tokens]
+        # Smart joining - no space before punctuation
+        result = []
+        no_space_before = {",", ".", ":", ";", ")", "]", "}", "'", '"'}
+        no_space_after = {"(", "[", "{", "'", '"'}
 
-        # Join tokens (simple: space between)
-        # TODO: Smarter joining (no space before :,.)
-        return " ".join(tokens)
+        for i, token in enumerate(tokens):
+            if i == 0:
+                result.append(token)
+            elif token in no_space_before:
+                result.append(token)
+            elif result and result[-1] and result[-1][-1] in no_space_after:
+                result.append(token)
+            else:
+                result.append(" " + token)
+
+        return "".join(result)
 
     def save(self, path: str):
+        """Save tokenizer to JSON."""
         data = {
             "vocab": self.vocab,
-            "merges": {str(k): v for k, v in self.merges.items()},
+            "merges": {f"{k[0]}|||{k[1]}": v for k, v in self.merges.items()},
             "vocab_size": self.vocab_size,
         }
-
         with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f)
+        print(f"Saved tokenizer to {path}")
 
     def load(self, path: str):
-        with open(path, "r") as f:
+        """Load tokenizer from JSON."""
+        with open(path) as f:
             data = json.load(f)
 
         self.vocab = data["vocab"]
-        self.vocab_size = data["vocab_size"]
+        self.vocab_size = data.get("vocab_size", len(self.vocab))
         self.idx_to_token = {int(v): k for k, v in self.vocab.items()}
 
-        self.merges = {eval(k): v for k, v in data["merges"].items()}
+        # Parse merges
+        self.merges = {}
+        for k, v in data.get("merges", {}).items():
+            if "|||" in k:
+                parts = k.split("|||")
+                self.merges[(parts[0], parts[1])] = v
+            else:
+                # Handle old format with eval
+                try:
+                    self.merges[eval(k)] = v
+                except:
+                    pass
+
+        print(f"Loaded tokenizer: {len(self.vocab)} tokens, {len(self.merges)} merges")
 
 
 if __name__ == "__main__":
-    print("Testing CodeBPETokenizer...\n")
+    import sys
 
-    tokenizer = CodeBPETokenizer(vocab_size=3000)
+    tokenizer = CodeBPETokenizer(vocab_size=16000)
 
-    code = "def add(a, b):\n    return a + b"
-    pre_tokens = tokenizer.pre_tokenize(code)
-    print(f"Pre-tokenization:")
-    print(f"  Input: {repr(code)}")
-    print(f"  Output: {pre_tokens}\n")
+    data_dir = sys.argv[1] if len(sys.argv) > 1 else "data/the-stack"
+    tokenizer.build_vocab(data_dir, max_examples=50000)
 
-    print("Building vocab from TextFusion code...")
-
-    all_files = []
-    for pattern in ["**/*.py"]:
-        files = Path(".").glob(pattern)
-        all_files.extend(
-            [
-                f
-                for f in files
-                if ".venv" not in str(f)
-                and "__pycache__" not in str(f)
-                and "site-packages" not in str(f)
-            ]
-        )
-
-    print(f"Found {len(all_files)} Python files (excluding venv/cache)")
-
-    tokenizer.build_vocab_from_corpus([str(f) for f in all_files], max_files=50)
-
-    print(f"\nTesting encoding:")
-    print(f"  Input: {repr(code)}")
-    encoded = tokenizer.encode(code)
-    print(f"  Encoded IDs: {encoded}")
-    print(f"  Encoded tokens: {[tokenizer.idx_to_token[i] for i in encoded]}")
-
-    decoded = tokenizer.decode(encoded)
-    print(f"  Decoded: {decoded}")
-
-    complex_code = """
-def calculate_total(items):
+    # Test
+    test_code = """def calculate_total(items):
     total = 0
     for item in items:
         total += item
     return total
-""".strip()
 
-    print(f"\nTesting on complex code:")
-    print(f"  Input: {repr(complex_code)}")
-    encoded2 = tokenizer.encode(complex_code)
-    print(f"  Num tokens: {len(encoded2)}")
-    decoded2 = tokenizer.decode(encoded2)
-    print(f"  Decoded: {decoded2[:100]}...")
+if __name__ == "__main__":
+    print(calculate_total([1, 2, 3]))
+"""
+
+    print("\n" + "=" * 60)
+    print("Testing tokenizer")
+    print("=" * 60)
+
+    encoded = tokenizer.encode(test_code)
+    print(f"\nEncoded ({len(encoded)} tokens): {encoded[:30]}...")
+
+    # Show actual tokens
+    tokens = [tokenizer.idx_to_token[i] for i in encoded]
+    print(f"Tokens: {tokens[:30]}...")
+
+    decoded = tokenizer.decode(encoded)
+    print(f"\nDecoded:\n{decoded}")
+
+    # Check common keywords
+    print("\nKeyword encoding:")
+    for kw in ["import", "def", "class", "return", "self", "__name__", "__main__"]:
+        enc = tokenizer.encode(kw)
+        toks = [tokenizer.idx_to_token[i] for i in enc]
+        print(f"  '{kw}' -> {len(enc)} tokens: {toks}")
 
     # Save
-    Path("data").mkdir(exist_ok=True)
-    tokenizer.save("data/code_tokenizer.json")
-    print(f"\nTokenizer saved to data/code_tokenizer.json")
-
-    print(f"\nVocab samples:")
-    sample_tokens = list(tokenizer.vocab.keys())[5:25]
-    print(f"  {sample_tokens}")
+    tokenizer.save("data/code_tokenizer_16k.json")
