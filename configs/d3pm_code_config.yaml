@@ -1,16 +1,35 @@
-defaults:
-  - model: d3pm_code
-  - data: code
-  - training: d3pm
-  - _self_
-
-experiment_name: "d3pm_code"
 seed: 42
+device: cuda
 
-device: "cpu"
+# Data
+data:
+  data_dir: data/the-stack
+  tokenizer_path: data/code_tokenizer_16k.json
+  max_seq_len: 256
+  max_examples: null # null = use all
+  num_workers: 4
 
-tensorboard:
-  log_dir: "outputs/logs_d3pm"
+# Model
+model:
+  vocab_size: 16000
+  embed_dim: 256
+  num_layers: 6
+  num_heads: 8
+  ff_dim: 1024
+  dropout: 0.1
+  schedule_type: linear
 
-checkpoint_dir: "outputs/checkpoints_d3pm"
-sample_dir: "outputs/samples_d3pm"
+# Training
+training:
+  batch_size: 1024
+  epochs: 100
+  lr: 3e-4
+  weight_decay: 0.01
+  sample_every: 5
+  save_every: 10
+
+# Output
+output:
+  log_dir: outputs/logs_code
+  checkpoint_dir: outputs/checkpoints_code
+  sample_dir: outputs/samples_code
